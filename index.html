@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>webtune — chromatic tuner</title>
+  <style>
+    :root {
+      --bg: #0B0F14;
+      --panel: #121821;
+      --hairline: rgba(255, 255, 255, 0.07);
+      --text: #EAF0F6;
+      --muted: #6C7A8A;
+      --flat: #5BC8E8;   /* cool  */
+      --intune: #57E39A; /* calm  */
+      --sharp: #F2A65A;  /* warm  */
+      /* --accent is set from JS to the current tuning-state colour */
+      --accent: var(--muted);
+      --font-display: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--font-display);
+      -webkit-font-smoothing: antialiased;
+      transition: background 400ms ease;
+      display: flex;
+      justify-content: center;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 600px;
+      min-height: 100dvh;
+      padding: 20px 22px calc(20px + env(safe-area-inset-bottom));
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* ---- top bar ---- */
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+    .brand .dot { color: var(--accent); transition: color 300ms ease; }
+
+    .ref {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 999px;
+      padding: 5px 6px 5px 12px;
+    }
+    .ref__label {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .ref__val { color: var(--text); }
+    .step {
+      appearance: none;
+      border: 1px solid var(--hairline);
+      background: transparent;
+      color: var(--text);
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+    .step:hover { background: rgba(255, 255, 255, 0.06); }
+    .step:active { background: rgba(255, 255, 255, 0.12); }
+
+    /* ---- main readout ---- */
+    .stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-align: center;
+    }
+
+    .status {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.32em;
+      color: var(--accent);
+      font-weight: 600;
+      height: 1em;
+      transition: color 300ms ease;
+    }
+
+    .note {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      line-height: 0.9;
+      color: var(--accent);
+      transition: color 250ms ease;
+    }
+    .note__letter {
+      font-size: clamp(7rem, 26vw, 14rem);
+      font-weight: 800;
+      letter-spacing: -0.05em;
+    }
+    .note__acc {
+      font-size: clamp(2rem, 7vw, 4rem);
+      font-weight: 700;
+      margin-top: 0.32em;
+    }
+    .note__oct {
+      font-family: var(--font-mono);
+      font-size: clamp(1.4rem, 5vw, 2.4rem);
+      color: var(--muted);
+      font-weight: 500;
+      align-self: flex-end;
+      margin-bottom: 0.55em;
+      margin-left: 0.1em;
+    }
+    .note.is-empty { color: var(--muted); }
+    /* Idle: a thin, faint dash — reads as a tuner's flatline, not a heavy bar. */
+    .note.is-empty .note__letter {
+      font-weight: 200;
+      font-size: clamp(5rem, 20vw, 10rem);
+      opacity: 0.3;
+    }
+
+    .data {
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+    .data__cents {
+      font-size: clamp(1.5rem, 6vw, 2.1rem);
+      color: var(--accent);
+      transition: color 250ms ease;
+      min-width: 5ch;
+    }
+    .data__hz { font-size: 1rem; color: var(--muted); min-width: 8ch; text-align: left; }
+
+    /* ---- strobe band (the signature) ---- */
+    .strobe {
+      position: relative;
+      width: 100%;
+      height: 76px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+    }
+    .strobe__stripes {
+      position: absolute;
+      inset: 0;
+      /* two overlaid stripe layers give the disc a bit of depth */
+      background-image: repeating-linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent) 34%, transparent) 0 10px,
+        transparent 10px 20px
+      );
+      opacity: 0.5;
+      will-change: background-position;
+      transition: opacity 300ms ease;
+    }
+    .strobe__intune {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 50%;
+      width: 10%;
+      transform: translateX(-50%);
+      background: color-mix(in srgb, var(--intune) 16%, transparent);
+      opacity: 0;
+      transition: opacity 200ms ease;
+    }
+    .strobe.is-intune .strobe__intune { opacity: 1; }
+    .strobe__center {
+      position: absolute;
+      top: 8px; bottom: 8px;
+      left: 50%;
+      width: 2px;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.35);
+    }
+    .strobe__needle {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 50%;
+      width: 4px;
+      margin-left: -2px;
+      border-radius: 2px;
+      background: var(--accent);
+      box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
+      transition: background 250ms ease, box-shadow 250ms ease;
+    }
+    .strobe.is-idle .strobe__needle { opacity: 0.25; }
+
+    .scale {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-top: 8px;
+    }
+
+    /* ---- scope + level ---- */
+    .scope {
+      width: 100%;
+      height: 72px;
+      display: block;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+    }
+    .level {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+    .level__track {
+      flex: 1;
+      height: 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.07);
+      overflow: hidden;
+    }
+    .level__fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 90ms linear, background 250ms ease;
+    }
+
+    /* ---- start / stop ---- */
+    .go {
+      appearance: none;
+      border: 1px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      color: var(--text);
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 0.95rem;
+      padding: 14px 22px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 160ms ease, border-color 300ms ease, transform 120ms ease;
+    }
+    .go:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+    .go:active { transform: translateY(1px); }
+
+    /* ---- message overlay ---- */
+    .message {
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      padding: 16px 18px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    .message strong { color: var(--text); font-weight: 600; }
+    .message code {
+      font-family: var(--font-mono);
+      font-size: 0.82em;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 5px;
+      color: var(--text);
+    }
+    .message.is-error { border-color: color-mix(in srgb, var(--sharp) 45%, var(--hairline)); }
+    [hidden] { display: none !important; }
+
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition-duration: 60ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="bar">
+      <div class="brand">webtune<span class="dot">.</span></div>
+      <div class="ref" role="group" aria-label="Reference pitch for A4">
+        <button class="step" id="refDown" type="button" aria-label="Lower reference pitch">−</button>
+        <span class="ref__label">A4 <span class="ref__val" id="refVal">440</span> Hz</span>
+        <button class="step" id="refUp" type="button" aria-label="Raise reference pitch">+</button>
+      </div>
+    </header>
+
+    <section class="stage" aria-label="Tuning readout">
+      <div class="status" id="status" aria-live="polite">Ready</div>
+
+      <div class="note is-empty" id="note" aria-hidden="true">
+        <span class="note__letter" id="noteLetter">—</span><span class="note__acc" id="noteAcc"></span><span class="note__oct" id="noteOct"></span>
+      </div>
+
+      <div class="data">
+        <span class="data__cents" id="cents"></span>
+        <span class="data__hz" id="hz"></span>
+      </div>
+
+      <div class="strobe is-idle" id="strobe" aria-hidden="true">
+        <div class="strobe__stripes" id="stripes"></div>
+        <div class="strobe__intune"></div>
+        <div class="strobe__center"></div>
+        <div class="strobe__needle" id="needle"></div>
+      </div>
+      <div class="scale" aria-hidden="true">
+        <span>♭ flat</span><span>sharp ♯</span>
+      </div>
+    </section>
+
+    <div class="message" id="message" hidden></div>
+
+    <canvas class="scope" id="scope" aria-hidden="true"></canvas>
+
+    <div class="level" aria-hidden="true">
+      <span>input</span>
+      <div class="level__track"><div class="level__fill" id="levelFill"></div></div>
+    </div>
+
+    <button class="go" id="go" type="button">Start tuning</button>
+    <p class="sr-only" id="live" aria-live="polite"></p>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ===================================================================
+    // DSP — inlined verbatim from pitch.js (verified by pitch.test.mjs).
+    // verify-inlined.mjs extracts everything between the DSP markers below and
+    // runs the full test suite against it, so this shipped copy cannot drift.
+    // >>> DSP-BEGIN
+    const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    function frequencyToNote(freq, a4 = 440) {
+      const midiFloat = 69 + 12 * Math.log2(freq / a4);
+      const midi = Math.round(midiFloat);
+      const cents = 100 * (midiFloat - midi);
+      const name = NOTE_NAMES[((midi % 12) + 12) % 12];
+      const octave = Math.floor(midi / 12) - 1;
+      const targetFreq = a4 * Math.pow(2, (midi - 69) / 12);
+      return { midi, name, octave, label: `${name}${octave}`, cents, targetFreq };
+    }
+
+    function rms(buf) {
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    }
+
+    function detectPitch(buf, sampleRate, opts = {}) {
+      const rmsThreshold = opts.rmsThreshold ?? 0.01;
+      const minFreq = opts.minFreq ?? 27;   // A0 = 27.5 Hz — full piano range
+      const maxFreq = opts.maxFreq ?? 4500;  // above C8 = 4186 Hz
+      const clarity = opts.clarity ?? 0.9;
+      const n = buf.length;
+
+      if (rms(buf) < rmsThreshold) return -1;
+
+      const maxLag = Math.min(n - 1, Math.ceil(sampleRate / minFreq));
+      const minLag = Math.max(1, Math.floor(sampleRate / maxFreq));
+
+      const nsdf = new Float32Array(maxLag + 1);
+      for (let lag = 0; lag <= maxLag; lag++) {
+        let acf = 0;
+        let m = 0;
+        for (let i = 0; i < n - lag; i++) {
+          acf += buf[i] * buf[i + lag];
+          m += buf[i] * buf[i] + buf[i + lag] * buf[i + lag];
+        }
+        nsdf[lag] = m > 0 ? (2 * acf) / m : 0;
+      }
+
+      // Skip the central lobe starting from lag 1 (NOT minLag): for high notes
+      // minLag can fall inside the first genuine period peak, which would then
+      // be skipped and cause an octave-down error.
+      let lag = 1;
+      while (lag <= maxLag && nsdf[lag] > 0) lag++;
+
+      const peaks = [];
+      while (lag <= maxLag) {
+        if (nsdf[lag] > 0) {
+          let peakLag = lag;
+          let peakVal = nsdf[lag];
+          while (lag <= maxLag && nsdf[lag] > 0) {
+            if (nsdf[lag] > peakVal) { peakVal = nsdf[lag]; peakLag = lag; }
+            lag++;
+          }
+          if (peakLag >= minLag) peaks.push([peakLag, peakVal]);
+        } else {
+          lag++;
+        }
+      }
+      if (peaks.length === 0) return -1;
+
+      let best = -Infinity;
+      for (const [, v] of peaks) if (v > best) best = v;
+      const threshold = clarity * best;
+      const chosen = peaks.find(([, v]) => v >= threshold);
+      if (!chosen) return -1;
+
+      const p = chosen[0];
+      const x1 = p > 0 ? nsdf[p - 1] : nsdf[p];
+      const x2 = nsdf[p];
+      const x3 = p < maxLag ? nsdf[p + 1] : nsdf[p];
+      const denom = x1 + x3 - 2 * x2;
+      const period = denom !== 0 ? p - (0.5 * (x3 - x1)) / denom : p;
+
+      return sampleRate / period;
+    }
+    // <<< DSP-END
+
+    // ===================================================================
+    // App
+    // ===================================================================
+    const FFT_SIZE = 4096;
+    const IN_TUNE_CENTS = 5;
+    // Minimum RMS to attempt pitch detection. Kept low so quiet notes and the
+    // decaying tail of a plucked string still register.
+    const RMS_THRESHOLD = 0.005;
+    // High-pass cutoff (Hz) applied to the input to reject mains hum and rumble.
+    // 80 Hz sits just below low E and attenuates 50/60 Hz hum hard; notes below
+    // the cutoff still detect via their harmonics.
+    const HP_CUTOFF = 80;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const serveHint =
+      'Microphone access needs a page served over <strong>localhost</strong> or <strong>https</strong>. ' +
+      'Opening the file directly (<code>file://</code>) won\'t work. In this folder run ' +
+      '<code>python3 -m http.server</code> and open <code>http://localhost:8000</code>.';
+
+    const el = {
+      go: document.getElementById('go'),
+      status: document.getElementById('status'),
+      note: document.getElementById('note'),
+      letter: document.getElementById('noteLetter'),
+      acc: document.getElementById('noteAcc'),
+      oct: document.getElementById('noteOct'),
+      cents: document.getElementById('cents'),
+      hz: document.getElementById('hz'),
+      strobe: document.getElementById('strobe'),
+      stripes: document.getElementById('stripes'),
+      needle: document.getElementById('needle'),
+      scope: document.getElementById('scope'),
+      levelFill: document.getElementById('levelFill'),
+      message: document.getElementById('message'),
+      refVal: document.getElementById('refVal'),
+      refUp: document.getElementById('refUp'),
+      refDown: document.getElementById('refDown'),
+      live: document.getElementById('live'),
+    };
+
+    const state = {
+      running: false,
+      a4: 440,
+      audio: null,
+      analyser: null,
+      stream: null,
+      timeBuf: null,
+      freqBuf: null,
+      raf: 0,
+      freqSmooth: -1,
+      hasNote: false,   // has a note been detected since Start? (drives hold-last-note)
+      needlePos: 0,     // -1..1
+      targetNeedle: 0,  // -1..1, updated on each pitch detection
+      velocity: 0,      // strobe drift px/sec
+      strobePhase: 0,
+      lastFrame: 0,
+      lastPitch: 0,
+      lastAnnounce: '',
+    };
+
+    // ---- rendering helpers ----
+    function setAccent(color) {
+      document.documentElement.style.setProperty('--accent', color);
+    }
+
+    function showMessage(html, isError) {
+      el.message.innerHTML = html;
+      el.message.hidden = false;
+      el.message.classList.toggle('is-error', !!isError);
+    }
+    function clearMessage() { el.message.hidden = true; }
+
+    function renderIdle(statusText) {
+      el.status.textContent = statusText;
+      el.note.classList.add('is-empty');
+      el.letter.textContent = '—';
+      el.acc.textContent = '';
+      el.oct.textContent = '';
+      el.cents.textContent = '';
+      el.hz.textContent = '';
+      el.strobe.classList.add('is-idle');
+      el.strobe.classList.remove('is-intune');
+      setAccent(getComputedStyle(document.documentElement).getPropertyValue('--muted').trim());
+    }
+
+    function render(note, freq) {
+      const cents = note.cents;
+      const inTune = Math.abs(cents) <= IN_TUNE_CENTS;
+      const color = inTune ? 'var(--intune)' : cents < 0 ? 'var(--flat)' : 'var(--sharp)';
+      setAccent(color);
+
+      el.note.classList.remove('is-empty');
+      el.strobe.classList.remove('is-idle');
+      el.strobe.classList.toggle('is-intune', inTune);
+
+      el.letter.textContent = note.name[0];
+      el.acc.textContent = note.name.length > 1 ? '♯' : '';
+      el.oct.textContent = note.octave;
+
+      const sign = cents > 0 ? '+' : '';
+      el.cents.textContent = `${sign}${cents.toFixed(1)} ¢`;
+      el.hz.textContent = `${freq.toFixed(1)} Hz`;
+
+      el.status.textContent = inTune ? 'In tune' : cents < 0 ? 'Flat' : 'Sharp';
+
+      // Screen-reader announcement only when the note or state changes.
+      const announce = `${note.label}, ${inTune ? 'in tune' : cents < 0 ? 'flat' : 'sharp'}`;
+      if (announce !== state.lastAnnounce) {
+        state.lastAnnounce = announce;
+        el.live.textContent = announce;
+      }
+    }
+
+    function drawScope() {
+      const c = el.scope;
+      const ctx = c.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const w = c.clientWidth, h = c.clientHeight;
+      if (c.width !== w * dpr || c.height !== h * dpr) {
+        c.width = w * dpr; c.height = h * dpr;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const bins = state.freqBuf;
+      const nyquist = state.audio.sampleRate / 2;
+      const fMin = 40, fMax = 4000;
+      const accentHex = resolveAccentHex();
+
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      const steps = w;
+      for (let x = 0; x <= steps; x++) {
+        // log-frequency axis: musically even spacing
+        const f = fMin * Math.pow(fMax / fMin, x / steps);
+        const bin = Math.min(bins.length - 1, Math.round((f / nyquist) * bins.length));
+        const v = bins[bin] / 255;
+        const y = h - v * (h - 4) - 2;
+        ctx.lineTo((x / steps) * w, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      // Canvas fillStyle has no color-mix/var() support, so resolve to rgba.
+      ctx.fillStyle = hexToRgba(accentHex, 0.22);
+      ctx.fill();
+
+      ctx.strokeStyle = hexToRgba(accentHex, 0.9);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Resolve the current --accent (which is a CSS var reference) to a hex value.
+    function resolveAccentHex() {
+      const s = getComputedStyle(document.documentElement);
+      const inTune = el.strobe.classList.contains('is-intune');
+      if (el.strobe.classList.contains('is-idle')) return s.getPropertyValue('--muted').trim();
+      const status = el.status.textContent;
+      if (status === 'In tune') return s.getPropertyValue('--intune').trim();
+      if (status === 'Flat') return s.getPropertyValue('--flat').trim();
+      if (status === 'Sharp') return s.getPropertyValue('--sharp').trim();
+      return s.getPropertyValue('--muted').trim();
+    }
+
+    function hexToRgba(hex, a) {
+      hex = hex.replace('#', '').trim();
+      if (hex.length === 3) hex = hex.split('').map((ch) => ch + ch).join('');
+      const n = parseInt(hex, 16);
+      const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      return `rgba(${r},${g},${b},${a})`;
+    }
+
+    // ---- main loop ----
+    // Animation (needle easing, strobe drift, scope) runs every frame; the
+    // costlier pitch detection is throttled to ~40ms — plenty responsive and
+    // it keeps the UI smooth on slower machines.
+    const PITCH_INTERVAL = 40;
+
+    function detect() {
+      state.analyser.getFloatTimeDomainData(state.timeBuf);
+
+      const level = Math.min(1, rms(state.timeBuf) * 4);
+      el.levelFill.style.width = `${(level * 100).toFixed(1)}%`;
+
+      const freq = detectPitch(state.timeBuf, state.audio.sampleRate, { rmsThreshold: RMS_THRESHOLD });
+      if (freq > 0) {
+        state.hasNote = true;
+        // Smooth frequency for a steadier readout; snap on large jumps (new note).
+        if (state.freqSmooth <= 0 || Math.abs(1200 * Math.log2(freq / state.freqSmooth)) > 55) {
+          state.freqSmooth = freq;
+        } else {
+          state.freqSmooth += (freq - state.freqSmooth) * 0.35;
+        }
+        const note = frequencyToNote(state.freqSmooth, state.a4);
+        render(note, state.freqSmooth);
+
+        const clamped = Math.max(-50, Math.min(50, note.cents));
+        state.targetNeedle = clamped / 50;
+        state.velocity = clamped * 6; // px/sec strobe drift
+      } else if (state.hasNote) {
+        // Signal dropped below threshold — keep the last detected note on screen
+        // and just freeze the strobe (leave the needle where it was).
+        state.velocity = 0;
+      } else {
+        // Nothing detected yet since Start.
+        renderIdle(level > 0.02 ? 'Listening…' : 'Play a note');
+        state.freqSmooth = -1;
+        state.targetNeedle = 0;
+        state.velocity = 0;
+      }
+    }
+
+    function loop(now) {
+      state.raf = requestAnimationFrame(loop);
+      const dt = state.lastFrame ? (now - state.lastFrame) / 1000 : 0;
+      state.lastFrame = now;
+
+      if (now - state.lastPitch >= PITCH_INTERVAL) {
+        state.lastPitch = now;
+        detect();
+      }
+
+      // Ease the position line every frame for smoothness.
+      state.needlePos += (state.targetNeedle - state.needlePos) * 0.2;
+      el.needle.style.left = `${50 + state.needlePos * 45}%`;
+
+      // Strobe drift (frozen when in tune).
+      if (!reduceMotion) {
+        state.strobePhase = (state.strobePhase + state.velocity * dt) % 20;
+        el.stripes.style.backgroundPositionX = `${state.strobePhase}px`;
+      }
+
+      state.analyser.getByteFrequencyData(state.freqBuf);
+      drawScope();
+    }
+
+    // ---- start / stop ----
+    async function start() {
+      clearMessage();
+      // Chrome reports file:// as a "secure context", yet blocks mic access on
+      // it — so catch the file:// case explicitly rather than trusting
+      // isSecureContext, and point at the real fix (serve over localhost).
+      if (location.protocol === 'file:' || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        showMessage(serveHint, true);
+        return;
+      }
+
+      try {
+        state.stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            autoGainControl: false,
+            noiseSuppression: false,
+          },
+        });
+      } catch (err) {
+        const name = err && err.name;
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          showMessage(
+            'Microphone access was blocked. Allow it in your browser\'s site settings, then press Start again.',
+            true,
+          );
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          showMessage('No microphone found. Connect one and press Start.', true);
+        } else if (name === 'NotReadableError') {
+          showMessage('The microphone is in use by another app. Close it and press Start again.', true);
+        } else {
+          showMessage('Could not start the microphone. Check your browser settings and try again.', true);
+        }
+        return;
+      }
+
+      state.audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (state.audio.state === 'suspended') await state.audio.resume();
+      const src = state.audio.createMediaStreamSource(state.stream);
+
+      // Two cascaded Butterworth high-pass sections (24 dB/oct) knock out mains
+      // hum (50/60 Hz) and low rumble before analysis. The cutoff sits below the
+      // lowest note; lower notes still detect via their harmonics.
+      const hp1 = state.audio.createBiquadFilter();
+      hp1.type = 'highpass';
+      hp1.frequency.value = HP_CUTOFF;
+      hp1.Q.value = Math.SQRT1_2;
+      const hp2 = state.audio.createBiquadFilter();
+      hp2.type = 'highpass';
+      hp2.frequency.value = HP_CUTOFF;
+      hp2.Q.value = Math.SQRT1_2;
+
+      state.analyser = state.audio.createAnalyser();
+      state.analyser.fftSize = FFT_SIZE;
+      state.analyser.smoothingTimeConstant = 0.6;
+      src.connect(hp1);
+      hp1.connect(hp2);
+      hp2.connect(state.analyser);
+
+      state.timeBuf = new Float32Array(state.analyser.fftSize);
+      state.freqBuf = new Uint8Array(state.analyser.frequencyBinCount);
+
+      state.running = true;
+      el.go.textContent = 'Stop';
+      renderIdle('Play a note');
+      state.hasNote = false;
+      state.lastFrame = 0;
+      state.lastPitch = 0;
+      state.raf = requestAnimationFrame(loop);
+    }
+
+    function stop() {
+      state.running = false;
+      cancelAnimationFrame(state.raf);
+      if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+      if (state.audio) state.audio.close();
+      state.audio = state.analyser = state.stream = null;
+      el.go.textContent = 'Start tuning';
+      el.levelFill.style.width = '0%';
+      renderIdle('Ready');
+    }
+
+    // ---- controls ----
+    el.go.addEventListener('click', () => (state.running ? stop() : start()));
+
+    function setRef(v) {
+      state.a4 = Math.max(415, Math.min(466, v));
+      el.refVal.textContent = state.a4;
+    }
+    el.refUp.addEventListener('click', () => setRef(state.a4 + 1));
+    el.refDown.addEventListener('click', () => setRef(state.a4 - 1));
+
+    // Initial paint.
+    renderIdle('Ready');
+  </script>
+</body>
+</html>
