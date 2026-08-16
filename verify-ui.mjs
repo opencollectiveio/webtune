@@ -75,8 +75,10 @@ const cases = [
   { freq: 2093.005, label: 'C7',  status: 'In tune' }, // above the old 2 kHz ceiling
 ];
 
+// Serve the repo root by default, or a subdirectory passed as argv[2] (e.g. dist).
+const serveDir = join(new URL('.', import.meta.url).pathname, process.argv[2] || '.');
 const server = spawn('python3', ['-m', 'http.server', String(PORT)], {
-  cwd: new URL('.', import.meta.url).pathname, stdio: 'ignore',
+  cwd: serveDir, stdio: 'ignore',
 });
 const profile = mkdtempSync(join(tmpdir(), 'webtune-verify-'));
 const chrome = spawn(CHROME, [

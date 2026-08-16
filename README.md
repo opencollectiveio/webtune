@@ -24,8 +24,19 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-Any static file server works, and any `https://` host works once deployed. It is
-a single self-contained `index.html` with no build step and no dependencies.
+Any static file server works, and any `https://` host works once deployed.
+
+## Build
+
+The app is a single self-contained `index.html` with no runtime dependencies.
+`build.mjs` produces the deployable file in `dist/`, injecting the DSP from
+`pitch.js` so the shipped copy is always in sync with its source:
+
+```sh
+node build.mjs      # writes dist/index.html
+```
+
+Deploy `dist/index.html` to any static host.
 
 ## How pitch detection works
 
@@ -56,7 +67,11 @@ expected — webtune reports the true measured pitch.
 node --test              # unit-test the DSP against synthetic tones
 node verify-inlined.mjs  # check the DSP inlined in index.html matches pitch.js
 node verify-ui.mjs       # end-to-end: drive the UI in headless Chrome
+node build.mjs           # write the deployable dist/index.html
 ```
+
+Both verifiers accept a target: `node verify-ui.mjs dist` and
+`node verify-inlined.mjs dist/index.html` check the built file.
 
 `verify-ui.mjs` drives the page with an oscillator-backed test microphone at
 known frequencies and asserts the rendered note and status. It requires Google

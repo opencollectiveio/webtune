@@ -1,14 +1,15 @@
-// verify-inlined.mjs — proves the DSP inlined in index.html is byte-for-byte
-// behaviourally identical to the tested pitch.js by extracting it and running
-// the full test suite (pitch.test.mjs) against the extracted copy.
+// verify-inlined.mjs — proves the DSP inlined in an HTML file is behaviourally
+// identical to the tested pitch.js by extracting it and running the full test
+// suite (pitch.test.mjs) against the extracted copy.
 //
-// Usage: node verify-inlined.mjs
+// Usage: node verify-inlined.mjs [path-to-html]   (default: index.html)
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+const htmlPath = process.argv[2] || 'index.html';
+const html = readFileSync(new URL('./' + htmlPath, import.meta.url), 'utf8');
 
 const begin = html.indexOf('// >>> DSP-BEGIN');
 const end = html.indexOf('// <<< DSP-END');
